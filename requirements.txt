@@ -1,0 +1,33 @@
+# QuickNotes-AI Dependencies
+# 100% Free & Open Source - No Paid APIs
+
+# Core Framework
+streamlit>=1.28.0
+
+# Audio Processing
+openai-whisper>=20231117
+pyaudio>=0.2.14
+
+# LLM Integration
+ollama>=0.2.1
+
+# RAG Components
+sentence-transformers
+faiss-cpu
+PyMuPDF
+icalendar
+pyaudio
+openai-whisper
+# Document Processing
+PyMuPDF>=1.23.0
+
+# Calendar Export
+icalendar>=5.0.0
+
+# Data Processing
+numpy>=1.24.0
+pandas>=2.0.0
+
+# Audio utilities
+scipy>=1.11.0
+soundfile>=0.12.0
