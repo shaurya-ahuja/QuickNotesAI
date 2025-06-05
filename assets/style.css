@@ -1,0 +1,177 @@
+/* =========================================
+   QuickNotes-AI Design System
+   Streamlit-Compatible Light/Dark Mode
+   ========================================= */
+
+/* 
+   Streamlit uses [data-testid="stAppViewContainer"] with theme classes.
+   We use "inherit" and semi-transparent values for maximum compatibility.
+*/
+
+:root {
+    /* Accent Colors (constant across themes) */
+    --accent-blue: #2383E2;
+    --accent-blue-hover: #1a6fc0;
+    --accent-red: #FF3B30;
+    --accent-green: #34C759;
+
+    /* Adaptive Colors using rgba for transparency */
+    --text-on-light: #37352F;
+    --text-on-dark: #E0E0E0;
+    --bg-card-light: rgba(0, 0, 0, 0.03);
+    --bg-card-dark: rgba(255, 255, 255, 0.05);
+    --border-color: rgba(128, 128, 128, 0.2);
+
+    /* Typography */
+    --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+/* === GLOBAL TYPOGRAPHY === */
+html,
+body,
+[class*="css"],
+.stMarkdown,
+p,
+span,
+label,
+.stTextInput label {
+    font-family: var(--font-stack) !important;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+    font-weight: 600 !important;
+    letter-spacing: -0.02em !important;
+}
+
+/* === FIX: Ensure text is ALWAYS visible === */
+/* Force Streamlit's default text to inherit properly */
+.stApp p,
+.stApp span,
+.stApp label,
+.stApp .stMarkdown {
+    color: inherit !important;
+}
+
+/* Specific fix for captions and secondary text */
+.stApp .stCaption,
+.stApp small,
+.stApp figcaption {
+    opacity: 0.7;
+}
+
+/* === CARDS & CONTAINERS === */
+/* Use semi-transparent backgrounds that work in both themes */
+div[data-testid="stExpander"],
+.stTabs [data-baseweb="tab-panel"] {
+    background-color: var(--bg-card-light);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 16px;
+}
+
+/* Dark mode override using Streamlit's actual theme attribute */
+[data-theme="dark"] div[data-testid="stExpander"],
+[data-theme="dark"] .stTabs [data-baseweb="tab-panel"] {
+    background-color: var(--bg-card-dark);
+}
+
+/* === BUTTONS === */
+.stButton button {
+    border-radius: 6px !important;
+    font-weight: 500 !important;
+    padding: 0.5rem 1rem !important;
+    transition: all 0.15s ease;
+    border: 1px solid var(--border-color) !important;
+}
+
+.stButton button[kind="primary"] {
+    background-color: var(--accent-blue) !important;
+    border-color: var(--accent-blue) !important;
+    color: white !important;
+}
+
+.stButton button[kind="primary"]:hover {
+    background-color: var(--accent-blue-hover) !important;
+}
+
+/* === TABS === */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 8px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.stTabs [data-baseweb="tab"] {
+    height: 44px;
+    background-color: transparent !important;
+    border: none !important;
+    font-weight: 500;
+    opacity: 0.6;
+    color: inherit !important;
+}
+
+.stTabs [aria-selected="true"] {
+    opacity: 1 !important;
+    font-weight: 600 !important;
+    border-bottom: 2px solid var(--accent-blue) !important;
+    color: var(--accent-blue) !important;
+}
+
+/* === INPUTS === */
+.stTextInput input,
+.stTextArea textarea,
+.stSelectbox [data-baseweb="select"] {
+    background-color: transparent !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: 6px !important;
+    color: inherit !important;
+}
+
+/* === STATUS INDICATORS === */
+.status-available {
+    color: var(--accent-green) !important;
+    font-weight: 600;
+}
+
+.status-unavailable {
+    color: var(--accent-red) !important;
+    font-weight: 600;
+}
+
+/* === RECORDING INDICATOR === */
+.recording-indicator {
+    background-color: rgba(255, 59, 48, 0.1);
+    color: var(--accent-red);
+    padding: 16px;
+    border-radius: 8px;
+    font-weight: 600;
+    text-align: center;
+    border: 1px solid rgba(255, 59, 48, 0.2);
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.7;
+    }
+}
+
+/* === SIDEBAR === */
+section[data-testid="stSidebar"] {
+    border-right: 1px solid var(--border-color);
+}
+
+/* Hide Streamlit header decoration for cleaner look */
+header[data-testid="stHeader"] {
+    background: transparent !important;
+}
