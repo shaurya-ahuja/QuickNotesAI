@@ -358,3 +358,20 @@ class Database:
         success = cursor.rowcount > 0
         conn.close()
         return success
+    def reset_database(self) -> bool:
+        """Clear all data from the database."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("DELETE FROM action_items")
+            cursor.execute("DELETE FROM meeting_tags")
+            cursor.execute("DELETE FROM tags")
+            cursor.execute("DELETE FROM documents")
+            cursor.execute("DELETE FROM meetings")
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error resetting DB: {e}")
+            return False
+        finally:
+            conn.close()

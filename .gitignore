@@ -8,3 +8,12 @@ venv/
 .gemini/
 .idea/
 .vscode/
+
+# Uploads
+uploads/
+
+# Scripts
+setup_git_history.py
+
+# Logs
+*.log
