@@ -851,11 +851,7 @@ def render_settings_page():
     
     st.markdown("---")
     
-    # Appearance Section
-    st.subheader("🎨 Appearance")
-    st.info("💡 To toggle between **Light** and **Dark** mode, please use the app menu (⋮) in the top right corner > Settings > Theme.")
-    
-    st.markdown("---")
+
     
     # Danger Zone
     st.subheader("⚠️ Danger Zone")
