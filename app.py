@@ -813,11 +813,16 @@ def render_semantic_search():
                     context_text = "\n\n".join([r.document.content for r in results])
                     
                     # Generate answer
-                    summarizer = get_summarization_service()
-                    answer = summarizer.answer_question(query, context_text)
-                    
-                    st.markdown("### 🤖 AI Answer")
-                    st.info(answer)
+                    # Generate answer
+                    try:
+                        summarizer = get_summarization_service()
+                        answer = summarizer.answer_question(query, context_text)
+                        
+                        st.markdown("### 🤖 AI Answer")
+                        st.info(answer)
+                    except Exception as e:
+                        st.error(f"⚠️ AI Services Unavailable: {e}")
+                        st.caption("On Streamlit Cloud, local Ollama is not available. Please run locally for full AI features.")
                     
                     st.markdown("### 📚 Sources")
                     for r in results:
