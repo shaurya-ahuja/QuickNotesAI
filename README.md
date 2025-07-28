@@ -2,6 +2,7 @@
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.28+-red.svg)](https://streamlit.io/)
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://quicknotesai.streamlit.app/)
 
 > **🔒 100% Local & Private** - All processing happens on your device. No data ever leaves your machine.
 
