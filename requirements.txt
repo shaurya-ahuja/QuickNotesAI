@@ -3,7 +3,7 @@ streamlit>=1.28.0
 
 # Audio Processing
 openai-whisper>=20231117
-pyaudio>=0.2.14
+streamlit-audiorec>=0.1.3
 soundfile>=0.12.0
 scipy>=1.11.0
 
