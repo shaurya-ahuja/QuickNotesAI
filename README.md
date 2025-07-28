@@ -7,7 +7,7 @@
 
 QuickNotes-AI is a powerful, offline meeting notetaker that records live audio, transcribes using Whisper, summarizes with local LLMs, extracts action items, and provides semantic search over all your past meetings—all without any paid APIs or cloud dependencies.
 
-![QuickNotes-AI Dashboard](assets/mockups/quicknotes_ui_mockup_1.png)
+![QuickNotes-AI Dashboard](assets/mockups/QuickNotesAI.png)
 
 ## ✨ Features
 

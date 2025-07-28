@@ -121,7 +121,7 @@ def render_history_page(db):
                     st.markdown(f'<div class="summary-card-container">', unsafe_allow_html=True)
                     bullets = [b.strip() for b in meeting['summary'].split('\n') if b.strip()]
                     for b in bullets:
-                        st.markdown(f"• {b}")
+                        st.markdown(f"• {bullet}")
                     st.markdown('</div>', unsafe_allow_html=True)
                 else:
                     st.caption("No summary.")

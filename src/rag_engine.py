@@ -207,6 +207,67 @@ class RAGEngine:
         
         return len(new_docs)
     
+    def add_texts_batch(
+        self,
+        texts: List[Tuple[str, str]],
+        progress_callback=None
+    ) -> int:
+        """
+        Add multiple texts in batch (saves only once at end).
+        
+        Args:
+            texts: List of (text, source) tuples.
+            progress_callback: Optional callback(current, total) for progress.
+            
+        Returns:
+            Total number of chunks added.
+        """
+        if not texts:
+            return 0
+        
+        self._load_model()
+        
+        if self._index is None:
+            self._create_index()
+        
+        total_chunks = 0
+        all_new_docs = []
+        
+        for i, (text, source) in enumerate(texts):
+            if not text.strip():
+                continue
+            
+            # Chunk the text
+            chunks = self._chunk_text(text)
+            
+            for j, chunk in enumerate(chunks):
+                doc = Document(
+                    id=f"{source}_{len(self._documents) + len(all_new_docs) + j}",
+                    content=chunk,
+                    source=source,
+                    metadata={}
+                )
+                all_new_docs.append(doc)
+            
+            total_chunks += len(chunks)
+            
+            if progress_callback:
+                progress_callback(i + 1, len(texts))
+        
+        if all_new_docs:
+            # Generate all embeddings at once (much faster)
+            embeddings = self._model.encode([d.content for d in all_new_docs])
+            embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+            
+            # Add to index
+            self._index.add(embeddings.astype('float32'))
+            self._documents.extend(all_new_docs)
+            
+            # Save once at the end
+            self._save_index()
+        
+        return total_chunks
+    
     def add_file(self, filepath: str) -> int:
         """
         Add a file to the index.
@@ -353,9 +414,14 @@ class RAGEngine:
                 break
             
             source = result.document.source
+            # Use metadata for better context if available
+            title = result.document.metadata.get('title', source)
+            date = result.document.metadata.get('date', '')
+            
+            header = f"{title} ({date})" if date else title
             content = result.document.content
             
-            part = f"[Source: {source}]\n{content}"
+            part = f"[Source: {header}]\n{content}"
             context_parts.append(part)
             total_chars += len(part)
         
