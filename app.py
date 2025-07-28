@@ -13,6 +13,7 @@ import time
 import threading
 from datetime import datetime
 from typing import Optional, List, Dict, Any
+from st_audiorec import st_audiorec
 
 # Add src to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -31,7 +32,7 @@ def check_module_available(module_name: str) -> bool:
     import importlib.util
     return importlib.util.find_spec(module_name) is not None
 
-PYAUDIO_AVAILABLE = check_module_available("pyaudio")
+
 WHISPER_AVAILABLE = check_module_available("whisper")
 OLLAMA_AVAILABLE = check_module_available("ollama")
 FAISS_AVAILABLE = check_module_available("faiss")
@@ -237,11 +238,7 @@ from src.database import Database
 def get_database():
     return Database()
 
-@st.cache_resource  
-def get_recorder():
-    """Get audio recorder (loads PyAudio)."""
-    from src.audio_recorder import get_recorder as _get_recorder
-    return _get_recorder("uploads")
+
 
 @st.cache_resource
 def get_transcription_service(model_name: str = "base"):
@@ -315,7 +312,7 @@ def render_sidebar():
         st.subheader("System Status")
         
         status_items = [
-            ("PyAudio (Recording)", PYAUDIO_AVAILABLE),
+
             ("Whisper (Transcription)", WHISPER_AVAILABLE),
             ("Ollama (LLM)", OLLAMA_AVAILABLE),
             ("FAISS (RAG)", FAISS_AVAILABLE and SENTENCE_TRANSFORMERS_AVAILABLE),
@@ -890,52 +887,22 @@ def main():
         st.title("🎙️ New Meeting")
         st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
         
-        # Audio Recorder
-        if PYAUDIO_AVAILABLE:
-            col_rec1, col_rec2 = st.columns([1, 1])
-            with col_rec1:
-                # Add a big status indicator
-                if st.session_state.recording:
-                    st.markdown("""
-                        <div class="recording-indicator" style="background-color: rgba(255, 59, 48, 0.1); border: 1px solid #FF3B30; color: #FF3B30; padding: 15px; border-radius: 10px; margin-bottom: 20px; font-weight: bold; text-align: center;">
-                            🔴 RECORDING IN PROGRESS
-                        </div>
-                    """, unsafe_allow_html=True)
-                    
-                    if st.button("⏹️ Stop Recording", use_container_width=True, type="primary"):
-                        recorder = get_recorder()
-                        audio_path = recorder.stop_recording()
-                        st.session_state.recording = False
-                        st.session_state.recording_start_time = None
-                        st.session_state.audio_file = audio_path
-                        st.session_state.audio_source = "recorded"  # Track source
-                        st.rerun()
-                        
-                    # Calculate duration
-                    if st.session_state.recording_start_time:
-                        duration = int(time.time() - st.session_state.recording_start_time)
-                        mins, secs = divmod(duration, 60)
-                        st.markdown(f"<h3 style='text-align: center'>{mins:02d}:{secs:02d}</h3>", unsafe_allow_html=True)
-                        time.sleep(1)
-                        st.rerun()
-                        
-                else: # Not recording
-                    if st.button("🔴 Start Recording", use_container_width=True):
-                        try:
-                            recorder = get_recorder()
-                            recorder.start_recording()
-                            st.session_state.recording = True
-                            st.session_state.recording_start_time = time.time()
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Failed to start: {e}")
-                    
-                    # Show last saved status if file exists
-                    if st.session_state.audio_file and not st.session_state.processing:
-                        fname = os.path.basename(st.session_state.audio_file)
-                        st.success(f"✅ Recording Saved: {fname}")
-        else:
-            st.error("PyAudio not available. Please install dependencies.")
+        # Browser Audio Recorder
+        st.info("🎙️ Browser Audio: Click 'Start Recording', speak, then click 'Stop'.")
+        wav_audio_data = st_audiorec()
+        
+        if wav_audio_data is not None:
+            os.makedirs("uploads", exist_ok=True)
+            # Use a consistent filename for the current session recording
+            file_path = os.path.join("uploads", "browser_recording.wav")
+            with open(file_path, "wb") as f:
+                f.write(wav_audio_data)
+            
+            st.session_state.audio_file = file_path
+            st.session_state.audio_source = "recorded (browser)"
+            
+            # Show success message
+            st.success("✅ Audio captured successfully!")
             
         # Upload Fallback
         st.markdown("---")
