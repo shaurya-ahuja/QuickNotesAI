@@ -186,7 +186,11 @@ git push -u origin main
 - Set main file path: `app.py`
 - Click "Deploy"
 
-> ⚠️ **Note**: Some features (audio recording, Ollama) require local installation. Streamlit Cloud deployment works best for viewing past meetings and RAG search with pre-indexed data.
+> ⚠️ **Cloud Deployment Limitations**:
+>
+> 1.  **Audio Recording**: ✅ Works! (Uses your browser's microphone via `streamlit-audiorec`)
+> 2.  **AI Summarization**: ❌ **Not Available**. Streamlit Cloud does not run Ollama. AI features will show "Service Unavailable".
+> 3.  **Local vs Cloud**: This app is designed for local use. Cloud deployment is best for **viewing past meetings** and sharing insights, but active AI processing requires a local runner.
 
 ## 📁 Project Structure
 
