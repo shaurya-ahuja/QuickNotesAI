@@ -338,18 +338,25 @@ def render_sidebar():
         
         with st.expander("🌐 Remote Setup Guide"):
             st.markdown("""
-**To use from Streamlit Cloud:**
+**To use AI from Streamlit Cloud:**
 
-1. Run Ollama with CORS enabled:
+**Option 1: ngrok (Recommended)**
+```bash
+# Terminal 1: Start Ollama
+ollama serve
+
+# Terminal 2: Expose with ngrok
+ngrok http 11434
+```
+Copy the ngrok URL and paste it above.
+
+**Option 2: Direct IP (requires port forwarding)**
 ```bash
 OLLAMA_HOST=0.0.0.0 \\
 OLLAMA_ORIGINS="https://quicknotesai.streamlit.app" \\
 ollama serve
 ```
-
-2. Find your IP: `ifconfig | grep inet`
-
-3. Enter URL: `http://YOUR_IP:11434`
+Enter `http://YOUR_PUBLIC_IP:11434`
             """)
 
 
