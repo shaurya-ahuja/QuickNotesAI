@@ -200,9 +200,6 @@ st.markdown("""
     header[data-testid="stHeader"] {
         display: none !important;
     }
-    .stApp {
-        margin-top: -60px; /* Pull content up since header is gone */
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -251,6 +248,10 @@ def get_summarization_service():
     """Get summarization service (loads Ollama client)."""
     from src.summarizer import get_summarization_service as _get_service
     return _get_service()
+
+def get_ollama_url():
+    """Get current Ollama URL from session state."""
+    return st.session_state.get('ollama_url', 'http://localhost:11434')
 
 @st.cache_resource
 def get_action_extractor():
@@ -322,6 +323,34 @@ def render_sidebar():
             icon = "✅" if available else "❌"
             color = "status-available" if available else "status-unavailable"
             st.markdown(f'{icon} <span class="{color}">{name}</span>', unsafe_allow_html=True)
+        
+        st.markdown("---")
+        
+        # Ollama Server Configuration
+        st.subheader("🤖 AI Server")
+        ollama_url = st.text_input(
+            "Ollama URL",
+            value=st.session_state.get('ollama_url', 'http://localhost:11434'),
+            help="Enter your Ollama server URL. Use your local IP for remote access.",
+            key="ollama_url_input"
+        )
+        st.session_state['ollama_url'] = ollama_url
+        
+        with st.expander("🌐 Remote Setup Guide"):
+            st.markdown("""
+**To use from Streamlit Cloud:**
+
+1. Run Ollama with CORS enabled:
+```bash
+OLLAMA_HOST=0.0.0.0 \\
+OLLAMA_ORIGINS="https://quicknotesai.streamlit.app" \\
+ollama serve
+```
+
+2. Find your IP: `ifconfig | grep inet`
+
+3. Enter URL: `http://YOUR_IP:11434`
+            """)
 
 
 # ============== Active Meeting Page ==============
@@ -379,6 +408,7 @@ def render_results():
                     with st.spinner("Regenerating summary..."):
                         try:
                             summarizer = get_summarization_service()
+                            summarizer.set_host(get_ollama_url())
                             summary_res = summarizer.summarize(
                                 st.session_state.edited_transcript,
                                 language=result.language
@@ -813,9 +843,9 @@ def render_semantic_search():
                     context_text = "\n\n".join([r.document.content for r in results])
                     
                     # Generate answer
-                    # Generate answer
                     try:
                         summarizer = get_summarization_service()
+                        summarizer.set_host(get_ollama_url())
                         answer = summarizer.answer_question(query, context_text)
                         
                         st.markdown("### 🤖 AI Answer")
@@ -964,6 +994,7 @@ def main():
                     # 2. Summarize
                     status.write("🤖 Generating summary...")
                     summarizer = get_summarization_service()
+                    summarizer.set_host(get_ollama_url())
                     summary_res = summarizer.summarize(transcript_res.full_text, language=transcript_res.language)
                     st.session_state.current_summary = summary_res
                     

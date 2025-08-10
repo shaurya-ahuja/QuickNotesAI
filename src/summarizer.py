@@ -43,16 +43,34 @@ class SummarizationService:
     
     DEFAULT_MODEL = "llama2"
     FALLBACK_MODELS = ["llama2", "mistral", "gemma:7b", "phi"]
+    DEFAULT_HOST = "http://localhost:11434"
     
-    def __init__(self, model_name: str = None):
+    def __init__(self, model_name: str = None, host: str = None):
         """
         Initialize summarization service.
         
         Args:
             model_name: Ollama model to use. If None, will auto-detect available model.
+            host: Ollama server URL. If None, uses localhost:11434.
         """
         self.model_name = model_name
+        self.host = host or self.DEFAULT_HOST
         self._available_models = []
+        self._client = None
+    
+    def _get_client(self):
+        """Get or create Ollama client with current host."""
+        if not OLLAMA_AVAILABLE:
+            raise RuntimeError("Ollama is not installed.")
+        if self._client is None or getattr(self._client, '_host', None) != self.host:
+            self._client = ollama.Client(host=self.host)
+            self._client._host = self.host  # Track current host
+        return self._client
+    
+    def set_host(self, host: str):
+        """Update the Ollama server host URL."""
+        self.host = host
+        self._client = None  # Reset client to use new host
     
     @property
     def is_available(self) -> bool:
@@ -69,9 +87,17 @@ class SummarizationService:
         
         # Try to find an available model
         try:
-            response = ollama.list()
+            client = self._get_client()
+            response = client.list()
             # Handle both old and new Ollama API formats
-            models_list = response.get('models', [])
+            # New API returns ListResponse object with .models attribute
+            # Old API returns dict with 'models' key
+            if hasattr(response, 'models'):
+                models_list = response.models
+            elif isinstance(response, dict):
+                models_list = response.get('models', [])
+            else:
+                models_list = []
             self._available_models = []
             for m in models_list:
                 # New API uses .model or .name attribute, old API uses dict
@@ -107,8 +133,15 @@ class SummarizationService:
             return []
         
         try:
-            response = ollama.list()
-            models_list = response.get('models', [])
+            client = self._get_client()
+            response = client.list()
+            # Handle both old and new Ollama API formats
+            if hasattr(response, 'models'):
+                models_list = response.models
+            elif isinstance(response, dict):
+                models_list = response.get('models', [])
+            else:
+                models_list = []
             result = []
             for m in models_list:
                 if hasattr(m, 'model'):
@@ -153,7 +186,8 @@ class SummarizationService:
         
         # Call Ollama
         try:
-            response = ollama.chat(
+            client = self._get_client()
+            response = client.chat(
                 model=self.model_name,
                 messages=[{"role": "user", "content": prompt}]
             )
@@ -188,7 +222,8 @@ class SummarizationService:
         prompt = self._build_summary_prompt(transcript, language)
         
         try:
-            stream = ollama.chat(
+            client = self._get_client()
+            stream = client.chat(
                 model=self.model_name,
                 messages=[{"role": "user", "content": prompt}],
                 stream=True
@@ -231,7 +266,8 @@ QUESTION: {question}
 ANSWER:"""
         
         try:
-            response = ollama.chat(
+            client = self._get_client()
+            response = client.chat(
                 model=self.model_name,
                 messages=[{"role": "user", "content": prompt}]
             )
