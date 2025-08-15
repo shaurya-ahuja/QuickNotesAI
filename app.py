@@ -340,9 +340,14 @@ def render_sidebar():
             st.markdown("""
 **To use AI from Streamlit Cloud:**
 
+Download ngrok from https://ngrok.com/
+Download ollama from https://ollama.com/
+
 **Option 1: ngrok (Recommended)**
 ```bash
 # Terminal 1: Start Ollama
+OLLAMA_HOST=0.0.0.0 \\
+OLLAMA_ORIGINS="https://quicknotesai.streamlit.app" \\
 ollama serve
 
 # Terminal 2: Expose with ngrok

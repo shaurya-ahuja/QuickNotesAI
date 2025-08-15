@@ -186,11 +186,51 @@ git push -u origin main
 - Set main file path: `app.py`
 - Click "Deploy"
 
-> ⚠️ **Cloud Deployment Limitations**:
->
-> 1.  **Audio Recording**: ✅ Works! (Uses your browser's microphone via `streamlit-audiorec`)
-> 2.  **AI Summarization**: ❌ **Not Available**. Streamlit Cloud does not run Ollama. AI features will show "Service Unavailable".
-> 3.  **Local vs Cloud**: This app is designed for local use. Cloud deployment is best for **viewing past meetings** and sharing insights, but active AI processing requires a local runner.
+⚠️ **To Use AI Features on Streamlit Cloud**:
+
+Streamlit Cloud's free tier cannot run Whisper/Ollama models directly. You'll need to run Ollama on your local machine and connect it to your deployed app.
+
+**Prerequisites:**
+- Download and install [Ollama](https://ollama.com/)
+- Download and install [ngrok](https://ngrok.com/) (for Option 1)
+
+**Option 1: ngrok Tunnel (Recommended)**
+```bash
+# Terminal 1: Start Ollama with remote access
+OLLAMA_HOST=0.0.0.0 \
+OLLAMA_ORIGINS="https://quicknotesai.streamlit.app" \
+ollama serve
+
+# Terminal 2: Expose with ngrok
+ngrok http 11434
+```
+Copy the ngrok HTTPS URL (e.g., `https://abc123.ngrok.io`) and paste it in the **"Ollama Server URL"** field in the app sidebar.
+
+**Option 2: Direct IP (requires port forwarding)**
+```bash
+# Start Ollama with remote access
+OLLAMA_HOST=0.0.0.0 \
+OLLAMA_ORIGINS="https://quicknotesai.streamlit.app" \
+ollama serve
+```
+Configure your router to forward port 11434, then enter `http://YOUR_PUBLIC_IP:11434` in the **"Ollama Server URL"** field in the app sidebar.
+
+---
+
+**Alternatively: Run Locally (No Cloud Deployment Needed)**
+
+For simplest setup and full privacy, skip Streamlit Cloud and run everything on your machine:
+```bash
+# Terminal 1: Start Ollama
+ollama serve
+
+# Terminal 2: Run Streamlit
+streamlit run app.py
+# or
+./run_app.sh
+```
+Access the app at `http://localhost:8501`
+
 
 ## 📁 Project Structure
 
