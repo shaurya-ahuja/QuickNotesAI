@@ -1,0 +1,33 @@
+# Version control & CI
+.git
+.gitignore
+.github
+
+# Python caches / envs
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.python-version
+.pytest_cache/
+
+# Local user data (regenerated at runtime — never bake into the image)
+data/
+uploads/
+records/
+*.db
+*.sqlite3
+
+# Model caches (downloaded on first run)
+.cache/
+
+# Docs, tests, assets not needed at runtime
+tests/
+assets/
+*.md
+CHANGELOG.md
+
+# Editor / OS cruft
+.DS_Store
+.vscode/
+.idea/

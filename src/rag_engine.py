@@ -5,6 +5,7 @@ FAISS + SentenceTransformers for semantic search over meeting notes.
 """
 
 import os
+import re
 import json
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
@@ -24,10 +25,18 @@ except ImportError:
     FAISS_AVAILABLE = False
 
 try:
+    from rank_bm25 import BM25Okapi
+    BM25_AVAILABLE = True
+except ImportError:
+    BM25_AVAILABLE = False
+
+try:
     import fitz  # PyMuPDF
     PYMUPDF_AVAILABLE = True
 except ImportError:
     PYMUPDF_AVAILABLE = False
+
+from .reranker import BaseReranker, get_default_reranker
 
 
 @dataclass
@@ -45,9 +54,19 @@ class Document:
 
 @dataclass
 class SearchResult:
-    """A search result with score."""
+    """
+    A search result with scores from each retrieval stage.
+
+    `score` is the final ranking score used to order results (rerank score if
+    re-ranking ran, otherwise the fused hybrid score). The component scores are
+    exposed for transparency in the UI.
+    """
     document: Document
     score: float
+    dense_score: float = 0.0        # cosine similarity from FAISS (0-1)
+    sparse_score: float = 0.0       # BM25 score (unbounded, corpus-relative)
+    rerank_score: Optional[float] = None  # cross-encoder logit, if reranked
+    method: str = "dense"           # "dense" | "hybrid" | "hybrid+rerank"
 
 
 class RAGEngine:
@@ -62,31 +81,51 @@ class RAGEngine:
     # Text chunking settings
     CHUNK_SIZE = 500
     CHUNK_OVERLAP = 50
-    
+
+    # Hybrid retrieval settings
+    CANDIDATE_K = 20        # candidates pulled from each retriever before fusion
+    RRF_K = 60              # Reciprocal Rank Fusion constant (standard default)
+
     def __init__(
         self,
         model_name: str = None,
-        index_path: str = "data/vector_store"
+        index_path: str = "data/vector_store",
+        reranker: Optional[BaseReranker] = None,
     ):
         """
         Initialize RAG engine.
-        
+
         Args:
-            model_name: SentenceTransformer model name.
+            model_name: SentenceTransformer model name (dense embedder). Swap
+                this to use a different / fine-tuned embedding model.
             index_path: Directory to store FAISS index.
+            reranker: Optional cross-encoder reranker. If None, the process-wide
+                default is used lazily; if that is unavailable, retrieval falls
+                back to hybrid-only.
         """
         self.model_name = model_name or self.DEFAULT_MODEL
         self.index_path = index_path
-        
+
         self._model = None
         self._index = None
         self._documents: List[Document] = []
         self._dimension = None
-        
+
+        # Sparse (BM25) index, rebuilt lazily whenever the corpus changes.
+        self._bm25: Optional["BM25Okapi"] = None
+        self._reranker = reranker
+
         os.makedirs(index_path, exist_ok=True)
-        
+
         # Try to load existing index
         self._load_index()
+
+    @property
+    def reranker(self) -> BaseReranker:
+        """The active reranker (resolves the default lazily on first use)."""
+        if self._reranker is None:
+            self._reranker = get_default_reranker()
+        return self._reranker
     
     @property
     def is_available(self) -> bool:
@@ -201,10 +240,11 @@ class RAGEngine:
         # Add to index
         self._index.add(embeddings.astype('float32'))
         self._documents.extend(new_docs)
-        
+        self._bm25 = None  # corpus changed → rebuild sparse index lazily
+
         # Save to disk
         self._save_index()
-        
+
         return len(new_docs)
     
     def add_texts_batch(
@@ -262,10 +302,11 @@ class RAGEngine:
             # Add to index
             self._index.add(embeddings.astype('float32'))
             self._documents.extend(all_new_docs)
-            
+            self._bm25 = None  # corpus changed → rebuild sparse index lazily
+
             # Save once at the end
             self._save_index()
-        
+
         return total_chunks
     
     def add_file(self, filepath: str) -> int:
@@ -340,47 +381,162 @@ class RAGEngine:
         
         return chunks
     
+    def _tokenize(self, text: str) -> List[str]:
+        """Lowercase, alphanumeric word tokenizer used for BM25."""
+        return re.findall(r"\b\w+\b", text.lower())
+
+    def _build_bm25(self) -> None:
+        """(Re)build the in-memory BM25 index over the current corpus."""
+        if not BM25_AVAILABLE or not self._documents:
+            self._bm25 = None
+            return
+        corpus = [self._tokenize(d.content) for d in self._documents]
+        self._bm25 = BM25Okapi(corpus)
+
+    def _dense_search(self, query: str, k: int) -> List[Tuple[int, float]]:
+        """Dense FAISS retrieval → (doc_index, cosine_score) pairs, best first."""
+        if self._index is None:
+            return []
+        self._load_model()
+        query_embedding = self._model.encode([query])
+        query_embedding = query_embedding / np.linalg.norm(
+            query_embedding, axis=1, keepdims=True
+        )
+        k = min(k, len(self._documents))
+        scores, indices = self._index.search(query_embedding.astype("float32"), k)
+        return [
+            (int(idx), float(score))
+            for score, idx in zip(scores[0], indices[0])
+            if idx >= 0
+        ]
+
+    def _sparse_search(self, query: str, k: int) -> List[Tuple[int, float]]:
+        """Sparse BM25 retrieval → (doc_index, bm25_score) pairs, best first."""
+        if self._bm25 is None:
+            self._build_bm25()
+        if self._bm25 is None:
+            return []
+        tokens = self._tokenize(query)
+        if not tokens:
+            return []
+        scores = self._bm25.get_scores(tokens)
+        ranked = np.argsort(scores)[::-1][:k]
+        return [(int(i), float(scores[i])) for i in ranked if scores[i] > 0]
+
+    @staticmethod
+    def _rrf_fuse(
+        dense: List[Tuple[int, float]],
+        sparse: List[Tuple[int, float]],
+        rrf_k: int,
+    ) -> Dict[int, float]:
+        """
+        Reciprocal Rank Fusion of two ranked lists.
+
+        RRF combines rankings without normalising disparate score scales
+        (cosine vs BM25): each list contributes 1 / (rrf_k + rank) per document.
+        Returns a {doc_index: fused_score} map.
+        """
+        fused: Dict[int, float] = {}
+        for ranked in (dense, sparse):
+            for rank, (idx, _score) in enumerate(ranked):
+                fused[idx] = fused.get(idx, 0.0) + 1.0 / (rrf_k + rank + 1)
+        return fused
+
     def search(
         self,
         query: str,
         top_k: int = 5,
-        min_score: float = 0.3
+        min_score: float = 0.0,
+        use_hybrid: bool = True,
+        use_reranker: bool = True,
+        candidate_k: Optional[int] = None,
     ) -> List[SearchResult]:
         """
-        Search for relevant documents.
-        
+        Retrieve relevant documents with hybrid search and optional re-ranking.
+
+        Pipeline:
+          1. Dense retrieval (FAISS cosine) and, when available, sparse
+             retrieval (BM25) each return up to ``candidate_k`` candidates.
+          2. The two rankings are fused with Reciprocal Rank Fusion.
+          3. A cross-encoder re-ranks the fused candidates (if available).
+          4. The top ``top_k`` are returned.
+
+        Each stage degrades gracefully: no BM25 installed → dense-only; no
+        reranker available → fused order is kept.
+
         Args:
             query: Search query.
-            top_k: Maximum number of results.
-            min_score: Minimum similarity score (0-1).
-            
+            top_k: Number of results to return.
+            min_score: Dense cosine floor. Applied only in pure-dense mode
+                (use_hybrid=False and use_reranker=False) to preserve legacy
+                behaviour; ignored once fusion/re-ranking rescales relevance.
+            use_hybrid: Combine BM25 with dense retrieval via RRF.
+            use_reranker: Apply cross-encoder re-ranking to the candidate pool.
+            candidate_k: Candidate pool size before re-ranking (defaults to
+                ``CANDIDATE_K``, never smaller than ``top_k``).
+
         Returns:
-            List of SearchResult objects.
+            List of SearchResult ordered best-first.
         """
         if self._index is None or len(self._documents) == 0:
             return []
-        
-        self._load_model()
-        
-        # Encode query
-        query_embedding = self._model.encode([query])
-        query_embedding = query_embedding / np.linalg.norm(query_embedding, axis=1, keepdims=True)
-        
-        # Search
-        k = min(top_k, len(self._documents))
-        scores, indices = self._index.search(query_embedding.astype('float32'), k)
-        
-        # Build results
-        results = []
-        for score, idx in zip(scores[0], indices[0]):
-            if idx < 0 or score < min_score:
-                continue
-            
-            results.append(SearchResult(
-                document=self._documents[idx],
-                score=float(score)
-            ))
-        
+
+        candidate_k = max(candidate_k or self.CANDIDATE_K, top_k)
+
+        dense_hits = self._dense_search(query, candidate_k)
+        dense_scores = {idx: score for idx, score in dense_hits}
+
+        if use_hybrid and BM25_AVAILABLE:
+            sparse_hits = self._sparse_search(query, candidate_k)
+            sparse_scores = {idx: score for idx, score in sparse_hits}
+            fused_scores = self._rrf_fuse(dense_hits, sparse_hits, self.RRF_K)
+            ordered_idxs = sorted(fused_scores, key=fused_scores.get, reverse=True)
+            method = "hybrid"
+        else:
+            sparse_scores = {}
+            fused_scores = dict(dense_hits)  # cosine doubles as the base score
+            ordered_idxs = [idx for idx, _ in dense_hits]
+            method = "dense"
+
+        # Pure-dense legacy path: honour the cosine floor.
+        if method == "dense" and not use_reranker and min_score > 0:
+            ordered_idxs = [
+                i for i in ordered_idxs if dense_scores.get(i, 0.0) >= min_score
+            ]
+
+        if not ordered_idxs:
+            return []
+
+        candidate_idxs = ordered_idxs[:candidate_k]
+
+        # Cross-encoder re-ranking over the candidate pool (optional).
+        rerank_scores: Dict[int, float] = {}
+        reranker = self.reranker if use_reranker else None
+        if reranker is not None and reranker.is_available and candidate_idxs:
+            docs = [self._documents[i].content for i in candidate_idxs]
+            scores = reranker.rerank(query, docs)
+            if scores:  # empty list ⇒ reranker unavailable at call time
+                rerank_scores = dict(zip(candidate_idxs, scores))
+                candidate_idxs = sorted(
+                    candidate_idxs, key=lambda i: rerank_scores[i], reverse=True
+                )
+                method = f"{method}+rerank"
+
+        results: List[SearchResult] = []
+        for idx in candidate_idxs[:top_k]:
+            rerank_sc = rerank_scores.get(idx)
+            final = rerank_sc if rerank_sc is not None else fused_scores.get(idx, 0.0)
+            results.append(
+                SearchResult(
+                    document=self._documents[idx],
+                    score=float(final),
+                    dense_score=float(dense_scores.get(idx, 0.0)),
+                    sparse_score=float(sparse_scores.get(idx, 0.0)),
+                    rerank_score=float(rerank_sc) if rerank_sc is not None else None,
+                    method=method,
+                )
+            )
+
         return results
     
     def get_context(
@@ -431,7 +587,8 @@ class RAGEngine:
         """Clear all documents from the index."""
         self._index = None
         self._documents = []
-        
+        self._bm25 = None
+
         # Remove saved files
         index_file = os.path.join(self.index_path, "faiss.index")
         docs_file = os.path.join(self.index_path, "documents.pkl")
@@ -467,7 +624,8 @@ class RAGEngine:
         # Rebuild index
         self._documents = []
         self._index = None
-        
+        self._bm25 = None
+
         if remaining_docs:
             self._create_index()
             

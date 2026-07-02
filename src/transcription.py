@@ -5,6 +5,8 @@ Local Whisper-based speech-to-text with speaker segmentation.
 """
 
 import os
+import subprocess
+import shutil
 from typing import Optional, List, Dict, Tuple
 from dataclasses import dataclass
 import re
@@ -67,14 +69,54 @@ class TranscriptionService:
         return WHISPER_AVAILABLE
     
     def _load_model(self):
-        """Lazy load the Whisper model."""
+        """Lazy load the Whisper model, always on CPU to avoid MPS segfaults."""
         if self._model is None:
             if not WHISPER_AVAILABLE:
                 raise RuntimeError("Whisper is not installed. Please install with: pip install openai-whisper")
-            
+
+            # Force single-thread mode before loading to prevent MPS dispatch conflicts
+            # on Apple Silicon with PyTorch 2.x (segfault at inference start).
+            try:
+                import torch
+                torch.set_num_threads(1)
+            except Exception:
+                pass
+
             print(f"Loading Whisper {self.model_name} model...")
-            self._model = whisper.load_model(self.model_name)
+            self._model = whisper.load_model(self.model_name, device="cpu")
             print(f"Model loaded successfully!")
+
+    @staticmethod
+    def _to_wav(audio_path: str) -> str:
+        """
+        Convert audio to 16 kHz mono WAV using ffmpeg.
+        Returns path to the WAV file (may be a temp file).
+        Falls back to original path if ffmpeg is unavailable or conversion fails.
+        """
+        ext = os.path.splitext(audio_path)[1].lower()
+        if ext == ".wav":
+            return audio_path
+
+        if not shutil.which("ffmpeg"):
+            return audio_path
+
+        wav_path = os.path.splitext(audio_path)[0] + "_converted.wav"
+        try:
+            result = subprocess.run(
+                [
+                    "ffmpeg", "-y", "-i", audio_path,
+                    "-ar", "16000", "-ac", "1",
+                    "-c:a", "pcm_s16le",
+                    wav_path,
+                ],
+                capture_output=True,
+                timeout=60,
+            )
+            if result.returncode == 0 and os.path.exists(wav_path):
+                return wav_path
+        except Exception:
+            pass
+        return audio_path
     
     def transcribe(
         self,
@@ -97,25 +139,42 @@ class TranscriptionService:
         """
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
-        
+
         self._load_model()
-        
+
+        # Ensure single-thread mode is active at call time (survives model reload).
+        try:
+            import torch
+            torch.set_num_threads(1)
+        except Exception:
+            pass
+
+        # Convert non-WAV formats (e.g. webm from browser recorder) to 16 kHz mono WAV.
+        # Whisper can call ffmpeg itself, but doing it explicitly avoids codec edge-cases
+        # that produce malformed numpy arrays and trigger a segfault on Apple Silicon.
+        prepared_path = self._to_wav(audio_path)
+
         if progress_callback:
             progress_callback(0.1, "Loading audio...")
-        
-        # Transcribe with Whisper
-        transcribe_options = {
+
+        # fp16=False: required on CPU.  word_timestamps omitted (defaults to False):
+        # the DTW post-processing pass it enables runs AFTER the main loop in native
+        # C extension code — a SIGSEGV there cannot be caught by Python try/except,
+        # so it must never be set to True.  QuickNotes only uses segment-level start/end
+        # timestamps (from the "segments" list), not word-level timestamps, so this
+        # feature is unnecessary.
+        transcribe_options: Dict = {
             "verbose": False,
-            "word_timestamps": True,
+            "fp16": False,
         }
-        
+
         if language:
             transcribe_options["language"] = language
-        
+
         if progress_callback:
             progress_callback(0.3, "Transcribing audio...")
-        
-        result = self._model.transcribe(audio_path, **transcribe_options)
+
+        result = self._model.transcribe(prepared_path, **transcribe_options)
         
         if progress_callback:
             progress_callback(0.7, "Processing segments...")

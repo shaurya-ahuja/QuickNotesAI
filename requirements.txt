@@ -11,8 +11,9 @@ scipy>=1.11.0
 ollama>=0.2.1
 
 # RAG Components
-sentence-transformers
-faiss-cpu
+sentence-transformers            # dense embeddings + cross-encoder reranker
+faiss-cpu                        # dense vector search
+rank-bm25>=0.2.2                 # sparse keyword search (BM25) for hybrid retrieval
 
 # Document Processing
 PyMuPDF>=1.23.0

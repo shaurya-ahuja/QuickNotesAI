@@ -19,7 +19,7 @@ QuickNotes-AI is a powerful, offline meeting notetaker that records live audio, 
 | 👥 **Speaker Diarization** | Identify and attribute quotes to different speakers |
 | 🤖 **AI Summarization** | Bullet-point summaries using local Ollama LLMs |
 | ✅ **Action Item Extraction** | Auto-extract tasks with assignees, deadlines, and emoji tags |
-| 🔍 **RAG Search** | Semantic search over all past meetings using FAISS |
+| 🔍 **Hybrid RAG Search** | Hybrid retrieval (BM25 + FAISS via RRF) with cross-encoder re-ranking over all past meetings |
 | 📅 **Calendar Export** | Export action items to .ics files for Google Calendar/Outlook |
 | 📧 **Email Sharing** | Send meeting summaries via SMTP (Gmail, Outlook, etc.) |
 | 🏷️ **Tagging System** | Organize meetings with custom tags |
@@ -101,8 +101,9 @@ streamlit>=1.28.0        # Web UI framework
 openai-whisper>=20231117 # Speech-to-text
 ollama>=0.2.1            # Local LLM client
 pyaudio>=0.2.14          # Audio recording
-sentence-transformers    # Text embeddings
-faiss-cpu>=1.7.4         # Vector search
+sentence-transformers    # Dense embeddings + cross-encoder reranker
+faiss-cpu>=1.7.4         # Dense vector search
+rank-bm25>=0.2.2         # Sparse keyword search (BM25) for hybrid retrieval
 PyMuPDF>=1.23.0          # PDF processing
 icalendar>=5.0.0         # Calendar export
 ```
@@ -236,8 +237,10 @@ Access the app at `http://localhost:8501`
 
 ```
 QuickNotesAI/
-├── app.py                  # Main Streamlit application
+├── app.py                  # Main Streamlit application (UI only)
 ├── requirements.txt        # Python dependencies
+├── Dockerfile              # Production container (Render/Railway/Cloud Run)
+├── .dockerignore
 ├── README.md              # This file
 ├── .streamlit/
 │   └── config.toml        # Streamlit theme config
@@ -247,7 +250,8 @@ QuickNotesAI/
 │   ├── transcription.py   # Whisper transcription
 │   ├── summarizer.py      # Ollama LLM integration
 │   ├── action_extractor.py # Action item parsing
-│   ├── rag_engine.py      # FAISS vector search
+│   ├── rag_engine.py      # Hybrid retrieval (BM25 + FAISS + RRF)
+│   ├── reranker.py        # Swappable cross-encoder re-ranking
 │   ├── database.py        # SQLite storage
 │   ├── email_service.py   # SMTP email
 │   └── export_utils.py    # ICS export
@@ -256,6 +260,106 @@ QuickNotesAI/
 ├── data/                  # Database & vector store
 └── uploads/               # Uploaded audio files
 ```
+
+## 🧠 Hybrid Search & Re-ranking Architecture
+
+QuickNotes-AI's search does **not** rely on a single retriever. Each question
+runs through a three-stage pipeline (`src/rag_engine.py` + `src/reranker.py`):
+
+```
+                        ┌─────────────────────────┐
+   query ──────────────▶│ 1. Dense retrieval       │ FAISS cosine over
+                        │    (all-MiniLM-L6-v2)    │ 384-dim embeddings → top-K
+                        └───────────┬─────────────┘
+                                    │
+                        ┌───────────▼─────────────┐
+   query ──────────────▶│ 1. Sparse retrieval      │ BM25 keyword scoring
+                        │    (rank-bm25 / BM25Okapi)│ over tokenized chunks → top-K
+                        └───────────┬─────────────┘
+                                    │
+                        ┌───────────▼─────────────┐
+                        │ 2. Reciprocal Rank Fusion│ merge both rankings without
+                        │    (RRF, k=60)           │ normalizing score scales
+                        └───────────┬─────────────┘
+                                    │  fused candidate pool
+                        ┌───────────▼─────────────┐
+                        │ 3. Cross-encoder rerank  │ ms-marco-MiniLM re-scores
+                        │    (optional, PyTorch)   │ (query, passage) pairs jointly
+                        └───────────┬─────────────┘
+                                    │  top-N most relevant
+                                    ▼
+                          context → local LLM (Ollama)
+```
+
+**Why each stage matters**
+
+- **Dense retrieval** captures *meaning*: "Q3 costs" matches "third-quarter
+  expenses" even with zero shared words. It's weak on rare exact tokens
+  (names, IDs, acronyms).
+- **Sparse retrieval (BM25)** captures *exact keywords*: it reliably finds
+  "meeting_42" or "Project Andromeda" that a bi-encoder may blur away.
+- **Reciprocal Rank Fusion** combines the two rankings using only *rank
+  position* — `score = Σ 1/(k + rank)` — so it needs no fragile normalization
+  between cosine similarities and unbounded BM25 scores.
+- **Cross-encoder re-ranking** reads each `(query, passage)` pair *jointly*
+  (unlike the bi-encoder that embeds them separately), producing a much sharper
+  relevance signal. It's expensive, so it runs only on the small fused
+  candidate pool, not the whole corpus.
+
+**Graceful degradation.** Every stage is optional and fails soft:
+
+| Missing component | Behavior |
+|---|---|
+| `rank-bm25` not installed | Falls back to dense-only retrieval |
+| Cross-encoder model unavailable / can't download | Falls back to fused (hybrid) order |
+| `faiss` / `sentence-transformers` missing | Semantic search hidden; text search still works |
+
+The **Search** page exposes toggles for hybrid search and re-ranking, and each
+result shows its per-stage scores (`rerank` / `dense` / `bm25`) for
+transparency.
+
+**Swapping in your own models.** The reranker sits behind a small interface
+(`BaseReranker` in `src/reranker.py`). To plug in a fine-tuned / LoRA
+cross-encoder or a hosted reranking API, subclass `BaseReranker`, implement
+`is_available` and `rerank()`, and register it once at startup:
+
+```python
+from src.reranker import set_default_reranker
+set_default_reranker(MyLoRAReranker())
+```
+
+The dense embedding model is likewise swappable via the `model_name` argument
+to `RAGEngine` / `get_rag_engine()`.
+
+## 🐳 Docker Deployment (Render / Railway / Cloud Run)
+
+The included `Dockerfile` produces a production image that binds to the
+platform-provided `$PORT` and bundles `ffmpeg` for audio decoding.
+
+```bash
+# Build
+docker build -t quicknotes-ai .
+
+# Run locally
+docker run -p 8501:8501 quicknotes-ai
+# open http://localhost:8501
+```
+
+**Google Cloud Run**
+```bash
+gcloud run deploy quicknotes-ai \
+  --source . \
+  --allow-unauthenticated \
+  --memory 2Gi          # embeddings + reranker need headroom
+```
+
+**Render / Railway**
+- Point the service at this repo; both auto-detect the `Dockerfile`.
+- No start command needed — the image's `CMD` reads `$PORT` automatically.
+
+> ⚠️ The container runs Whisper, embeddings, and the reranker, but **not**
+> Ollama. Point the app's **Ollama Server URL** at a reachable Ollama instance
+> (see the Streamlit Cloud section above) to enable LLM summaries and answers.
 
 ## 🔒 Privacy & Security
 

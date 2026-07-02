@@ -12,6 +12,18 @@ venv/
 # Uploads
 uploads/
 
+# User data & derived indexes — NEVER commit (personal transcripts; the
+# vector store is a pickle, which is unsafe to load from an untrusted clone)
+data/
+*.db
+*.sqlite3
+
+# Local tooling config
+.claude/
+
+# Model caches
+.cache/
+
 # Scripts
 setup_git_history.py
 

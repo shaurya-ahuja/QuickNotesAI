@@ -1,10 +1,25 @@
 [theme]
 base = "dark"
 primaryColor = "#007AFF"
+backgroundColor = "#0E1117"
+secondaryBackgroundColor = "#161A23"
+textColor = "#E6E9EF"
 font = "sans serif"
 
 [server]
 headless = true
+# Cap uploads so large audio files fail fast with a clear message rather than
+# silently exhausting memory on small cloud instances.
+maxUploadSize = 500
+enableXsrfProtection = true
 
 [browser]
 gatherUsageStats = false
+
+[client]
+# Hide full stack traces from end users in production (avoids leaking file
+# paths / internals). Set to "full" locally if you need tracebacks in-browser.
+showErrorDetails = false
+
+[runner]
+fastReruns = true
